@@ -1,10 +1,13 @@
 import { timingSafeEqual } from 'node:crypto';
+import { BRANCHES, PALACE_NAMES_ORDER } from '@/lib/ziwei/constants';
+import { getLiuNianSiHua, getYearBranchIndex } from '@/lib/ziwei/sihua';
+import { getXiaoXianBranch } from '@/lib/ziwei/xiaoxian';
 
 type Message = { role: 'user' | 'assistant'; content: string };
 type Fields = Record<string, unknown>;
 
 const maxBodyBytes = 128 * 1024;
-const systemPrompt = '你是一位紫微斗数文化解读助手。用简体中文，先给出简要结论，再分点说明对应宫位、星曜和四化。以给出的排盘数据为准，区分命盘事实与传统解释，不编造缺失的信息、古籍引文或师承。把命理解读作为文化参考，不做确定性的健康、投资或人生预测。';
+const systemPrompt = '你是一位紫微斗数文化解读助手。用简体中文，先给出简要结论，再分点说明对应宫位、星曜和四化。以给出的排盘数据为准，区分命盘事实与传统解释，不编造缺失的信息、古籍引文或师承。分析某年时，优先使用本轮附带的农历流年资料，明确写出年份，并区分本命宫、流年宫和小限宫。如果用户问的是另一年，提醒在命盘上切换到对应年份再提问。把命理解读作为文化参考，不做确定性的健康、投资或人生预测。';
 
 function object(value: unknown): Fields {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -24,10 +27,14 @@ function chartContext(input: unknown) {
   if (!Array.isArray(chart.palaces) || chart.palaces.length !== 12) return null;
   const palaces = chart.palaces.map(input => {
     const palace = object(input);
-    if (typeof palace.name !== 'string' || !Array.isArray(palace.stars)) return null;
+    const { name, branch, stars } = palace;
+    if (typeof name !== 'string' || typeof branch !== 'number' || !Number.isInteger(branch)
+      || branch < 0 || branch > 11 || !Array.isArray(stars)) return null;
     return {
-      ...select(palace, ['name', 'branch', 'stem', 'isMingGong', 'isShenGong', 'isCurrentDaXian', 'borrowedFromName']),
-      stars: palace.stars.slice(0, 100).map(star => select(star, ['name', 'type', 'siHua', 'brightnessRaw'])),
+      ...select(palace, ['stem', 'isMingGong', 'isShenGong', 'isCurrentDaXian', 'borrowedFromName']),
+      name,
+      branch,
+      stars: stars.slice(0, 100).map(star => select(star, ['name', 'type', 'siHua', 'brightnessRaw'])),
       selfSihua: Array.isArray(palace.selfSihua)
         ? palace.selfSihua.slice(0, 12).map(mark => select(mark, ['starName', 'siHua']))
         : [],
@@ -36,14 +43,57 @@ function chartContext(input: unknown) {
   if (palaces.includes(null)) return null;
   return {
     ...select(chart, ['wuxingJuName', 'mingZhu', 'shenZhu', 'yinYangGender', 'currentAge', 'currentDaXianIndex']),
-    palaces,
+    palaces: palaces.filter(palace => palace !== null),
     daXians: Array.isArray(chart.daXians) ? chart.daXians.slice(0, 12).map(input => {
       const period = object(input);
-      return {
-        ...select(period, ['startAge', 'endAge', 'palaceName', 'palaceBranch', 'stemName']),
-        siHua: select(period.siHua, ['lu', 'quan', 'ke', 'ji']),
-      };
+      const fields = select(period, ['startAge', 'endAge', 'palaceName', 'palaceBranch', 'stemName']);
+      fields.siHua = select(period.siHua, ['lu', 'quan', 'ke', 'ji']);
+      return fields;
     }) : [],
+  };
+}
+
+function annualContext(input: unknown, chart: NonNullable<ReturnType<typeof chartContext>>, year: number) {
+  const { birthInfo, lunarInfo } = object(input);
+  const { lunarYear, yearBranch } = object(lunarInfo);
+  const { gender } = object(birthInfo);
+  if (typeof lunarYear !== 'number' || !Number.isInteger(lunarYear)) return { 年份: year, 说明: '缺少农历生年' };
+  const age = year - lunarYear + 1;
+  if (age < 1) return { 年份: year, 说明: '所选农历年份早于出生年' };
+
+  const annualBranch = getYearBranchIndex(year);
+  const { stemName, transforms } = getLiuNianSiHua(year);
+  const palaces = PALACE_NAMES_ORDER.map((name, offset) => {
+    const branch = (annualBranch - offset + 12) % 12;
+    return { 流年宫: name, 地支: BRANCHES[branch], 本命宫: chart.palaces.find(p => p.branch === branch)?.name };
+  });
+  const smallBranch = typeof yearBranch === 'number' && Number.isInteger(yearBranch)
+    && yearBranch >= 0 && yearBranch < 12 && (gender === 'male' || gender === 'female')
+    ? getXiaoXianBranch(yearBranch, age, gender)
+    : null;
+  const decade = chart.daXians.find(period =>
+    typeof period.startAge === 'number' && typeof period.endAge === 'number'
+    && age >= period.startAge && age <= period.endAge,
+  );
+
+  return {
+    农历年份: year,
+    流年干支: stemName + BRANCHES[annualBranch],
+    虚岁: age,
+    所属大限: decade ?? null,
+    流年十二宫: palaces,
+    流年四化: Object.entries(transforms).map(([transform, star]) => ({
+      四化: `化${transform}`,
+      星曜: star,
+      落宫: chart.palaces.filter(p => p.stars.some(s => s.name === star)).map(p => ({
+        本命宫: p.name,
+        流年宫: palaces[(annualBranch - p.branch + 12) % 12].流年宫,
+      })),
+    })),
+    小限: smallBranch === null ? null : {
+      地支: BRANCHES[smallBranch],
+      本命宫: chart.palaces.find(p => p.branch === smallBranch)?.name,
+    },
   };
 }
 
@@ -95,6 +145,11 @@ function messagesFor(input: Fields, mode: 'interpret' | 'heming'): Message[] | n
   const firstUser = messages.findIndex(message => message.role === 'user');
   const history = messages.slice(firstUser);
   history[0].content = `以下是本轮解读的命盘资料：\n${JSON.stringify(chart)}\n\n用户问题：${history[0].content}`;
+  const year = input.analysisYear;
+  if (typeof year === 'number' && Number.isInteger(year) && year >= 1 && year <= 9999) {
+    const latest = history[history.length - 1];
+    latest.content += `\n\n本轮所选农历流年资料：\n${JSON.stringify(annualContext(input.chart, chart, year))}`;
+  }
   return history;
 }
 

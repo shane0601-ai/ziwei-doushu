@@ -8,6 +8,10 @@ import TimeNav, { type TimeView, getYearStemIndex, buildSiHuaOverlay } from './T
 
 interface ChartBoardProps {
   chart: ZiweiChart;
+  timeView: TimeView;
+  liunianYear: number;
+  onTimeViewChange: (view: TimeView) => void;
+  onLiunianYearChange: (year: number) => void;
   onStarSelect?: (star: Star, palace: Palace) => void;
   onPalaceSelect?: (palace: Palace) => void;
   onSiHuaClick?: (starName: string, siHua: string, view: TimeView) => void;
@@ -52,10 +56,10 @@ function getSanFangSiZheng(branch: number): [number, number, number, number] {
 
 const ANIMATION_ORDER = [5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3, 4];
 
-export default function ChartBoard({ chart, onStarSelect, onPalaceSelect, onSiHuaClick }: ChartBoardProps) {
+export default function ChartBoard({
+  chart, timeView, liunianYear, onTimeViewChange, onLiunianYearChange, onStarSelect, onPalaceSelect, onSiHuaClick,
+}: ChartBoardProps) {
   const [selectedBranch, setSelectedBranch] = useState<number | null>(null);
-  const [timeView, setTimeView] = useState<TimeView>('mingpan');
-  const [liunianYear, setLiunianYear] = useState<number>(new Date().getFullYear());
 
   const palaceMap: Record<number, Palace> = {};
   chart.palaces.forEach(p => { palaceMap[p.branch] = p; });
@@ -94,8 +98,8 @@ export default function ChartBoard({ chart, onStarSelect, onPalaceSelect, onSiHu
         chart={chart}
         view={timeView}
         liunianYear={liunianYear}
-        onViewChange={setTimeView}
-        onYearChange={setLiunianYear}
+        onViewChange={onTimeViewChange}
+        onYearChange={onLiunianYearChange}
       />
 
       {/* 命盘标题 */}

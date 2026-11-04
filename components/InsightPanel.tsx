@@ -20,6 +20,7 @@ interface SelectedSiHua {
 
 interface InsightPanelProps {
   chart: ZiweiChart;
+  analysisYear: number;
   selectedPalace?: Palace | null;
   selectedSiHua?: SelectedSiHua | null;
 }
@@ -184,7 +185,7 @@ function AiContent({ text, streaming }: { text: string; streaming?: boolean }) {
   );
 }
 
-export default function InsightPanel({ chart, selectedPalace, selectedSiHua }: InsightPanelProps) {
+export default function InsightPanel({ chart, analysisYear, selectedPalace, selectedSiHua }: InsightPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -278,7 +279,7 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
 
   const streamResponse = async (apiMessages: { role: 'user' | 'assistant'; content: string }[]) => {
     try {
-      const res = await requestAnalysis('/api/interpret', { chart, messages: apiMessages });
+      const res = await requestAnalysis('/api/interpret', { chart, analysisYear, messages: apiMessages });
       if (!res.body) throw new Error('无响应流');
 
       const reader = res.body.getReader();
@@ -350,6 +351,9 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
 
       {/* ── Topic buttons ── */}
       <div className="flex-shrink-0 px-2 pt-2.5 pb-2" style={{ borderBottom: '1px solid var(--t-border)' }}>
+        <p className="mb-2 text-[11px]" style={{ color: 'var(--t-faint)' }}>
+          AI 解读年份：{analysisYear} 年（可在命盘上方切换流年）
+        </p>
         <div className="grid grid-cols-6 gap-1">
           {TOPICS.map(t => {
             const isActive = activeTopic === t.key;
